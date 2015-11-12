@@ -1,0 +1,1467 @@
+Index: app/src/main/java/com/example/jackson/obd_trabalho/MainActivity.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+--- app/src/main/java/com/example/jackson/obd_trabalho/MainActivity.java	(revision )
++++ app/src/main/java/com/example/jackson/obd_trabalho/MainActivity.java	(revision )
+@@ -0,0 +1,469 @@
++package com.example.jackson.obd_trabalho;
++
++import android.bluetooth.BluetoothAdapter;
++import android.bluetooth.BluetoothDevice;
++import android.bluetooth.BluetoothServerSocket;
++import android.bluetooth.BluetoothSocket;
++import android.content.Intent;
++import android.graphics.Color;
++import android.os.Handler;
++import android.os.Message;
++import android.support.v7.app.AppCompatActivity;
++import android.os.Bundle;
++import android.util.Log;
++import android.widget.TextView;
++import android.widget.Toast;
++
++import java.io.IOException;
++import java.io.InputStream;
++import java.io.OutputStream;
++import java.util.UUID;
++
++public class MainActivity extends AppCompatActivity {
++
++    public static final Integer ENABLE_BT = 1;
++
++    public static final int MSG_READ = 2;
++    public static final int MSG_WRITE = 3;
++
++    public static final UUID MY_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
++    //address map blueetooth do PC
++    public static final String address = "70:2C:1F:08:FF:3B";
++    
++    BluetoothAdapter bluetoothAdapter;
++    BluetoothDevice bluetoothDevice;
++    BluetoothSocket bluetoothSocket;
++
++    AcceptThread acceptThread;
++    ConnectedThread connectedThread;
++    ExecuteThread executeThread;
++    
++    private TextView txtRPM;
++    private TextView txtVelocidade;
++    private TextView txtBorboleta;
++    private TextView txtFluxoAr;
++    private TextView txtTemperatura;
++
++    @Override
++    protected void onCreate(Bundle savedInstanceState) {
++        super.onCreate(savedInstanceState);
++        setContentView(R.layout.activity_main);
++
++        txtRPM=(TextView) findViewById(R.id.txtRMP);
++        txtVelocidade=(TextView) findViewById(R.id.txtVelocidade);
++        txtBorboleta=(TextView) findViewById(R.id.txtBorboleta);
++        txtFluxoAr=(TextView) findViewById(R.id.txtFluxoAr);
++        txtTemperatura=(TextView) findViewById(R.id.txtTemperatura);
++
++    }
++    @Override
++    protected void onResume()
++    {
++
++        super.onResume();
++        configureOBD();
++
++    }
++
++    private void configureOBD()
++    {
++
++        bluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
++
++        if (bluetoothAdapter == null) {
++            // Device does not support Bluetooth
++            Toast.makeText(getApplicationContext(), "Bluetooth não suportado", Toast.LENGTH_SHORT).show();
++            finish();
++        }
++
++        if (!bluetoothAdapter.isEnabled()) {
++            Intent enableBtIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
++            startActivityForResult(enableBtIntent, ENABLE_BT);
++        }
++
++
++        bluetoothDevice = bluetoothAdapter.getRemoteDevice(address);
++        if (bluetoothDevice == null) {
++            Toast.makeText(getApplicationContext(), "Disposistivo nulo nao encontrado! ", Toast.LENGTH_SHORT).show();
++            return;
++        }
++
++        try {
++            bluetoothSocket = bluetoothDevice.createRfcommSocketToServiceRecord(MY_UUID);
++        } catch (IOException e) {
++            Toast.makeText(getApplicationContext(), "Erro ao criar Socket", Toast.LENGTH_SHORT).show();
++            e.printStackTrace();
++        }
++
++        try {
++            bluetoothSocket.connect();
++        } catch (IOException e) {
++            Toast.makeText(getApplicationContext(), "Erro ao conectar ao Socket", Toast.LENGTH_SHORT).show();
++            e.printStackTrace();
++        }
++
++        manageConnectedSocket(bluetoothSocket);
++        executeThread = new ExecuteThread();
++        executeThread.start();
++    }
++
++    private void manageConnectedSocket(BluetoothSocket socket)
++    {
++
++        connectedThread = new ConnectedThread(socket);
++        connectedThread.start();
++
++        String msg = "AT E0\r";
++        connectedThread.write(msg.getBytes());
++
++        msg = "AT L0\r";
++        connectedThread.write(msg.getBytes());
++
++        msg = "AT ST 00\r";
++        connectedThread.write(msg.getBytes());
++
++        msg = "AT SP 0\r";
++        connectedThread.write(msg.getBytes());
++
++        msg = "AT Z\r";
++        connectedThread.write(msg.getBytes());
++
++    }
++
++    Handler mHandler = new Handler()
++    {
++
++        @Override
++        public void handleMessage(Message msg)
++        {
++
++            //Log.i(TAG, "handleMessage");
++            switch (msg.what) {
++                case MSG_READ:
++
++                    byte[] readBuf = (byte[]) msg.obj;
++                    String readMessage = new String(readBuf, 0, msg.arg1);
++
++                    String[] linhas = readMessage.split("\\r\\n|\\r|\\n", -1);
++
++                    for (int i = 0; i < linhas.length; i++) {
++                        String linha = linhas[i];
++                        String[] retorno = linha.trim().split(" ");
++
++                        try {
++                            if (retorno[0].trim().equals("41")) {
++
++                                if (retorno[1].trim().equals("05")) {
++                                    int temp = Integer.parseInt(retorno[2].trim(), 16);
++                                    temp = temp - 40;
++                                    if(temp >=100){
++                                        txtTemperatura.setTextColor(Color.RED);
++                                    }else if(temp>=50 && temp<=120){
++                                        txtTemperatura.setTextColor(Color.parseColor("#E0BC00"));
++                                    }else if(temp <50){
++                                        txtTemperatura.setTextColor(Color.parseColor("#048A15"));
++                                    }
++
++                                    txtTemperatura.setText("Temperatura: " + temp + "Cº");
++
++                                }
++                                if (retorno[1].trim().equals("0C")) {
++                                    int p1 = Integer.parseInt(retorno[2].trim(), 16);
++                                    int p2 = Integer.parseInt(retorno[3].trim(), 16);
++                                    double rpm = (p1 * 256 + p2) / 4;
++
++                                    if(rpm >=12000){
++                                        txtRPM.setTextColor(Color.RED);
++                                    }else if(rpm>=6000 && rpm<=12000){
++                                        txtRPM.setTextColor(Color.parseColor("#E0BC00"));
++                                    }else if(rpm <6000){
++                                        txtRPM.setTextColor(Color.parseColor("#048A15"));
++                                    }
++
++                                    txtRPM.setText("RPM: " + rpm);
++
++                                }
++                                if (retorno[1].trim().equals("0D")) {
++                                    int vel = Integer.parseInt(retorno[2].trim(), 16);
++
++                                    if(vel >=100){
++                                        txtVelocidade.setTextColor(Color.RED);
++                                    }else if(vel>=60 && vel<=100){
++                                        txtVelocidade.setTextColor(Color.parseColor("#E0BC00"));
++                                    }else if(vel <60){
++                                        txtVelocidade.setTextColor(Color.parseColor("#048A15"));
++                                    }
++
++                                    txtVelocidade.setText("Velocidade: " + vel + " km/h");
++                                    //speedometer.setSpeed(vel, 1000, 300);
++                                }
++                                if (retorno[1].trim().equals("11")) {
++                                    int borb = Integer.parseInt(retorno[2].trim(), 16);
++                                    borb = borb * 100 / 255;
++
++                                    if(borb >=80){
++                                        txtBorboleta.setTextColor(Color.RED);
++                                    }else if(borb>=45 && borb<=79){
++                                        txtBorboleta.setTextColor(Color.parseColor("#E0BC00"));
++                                    }else if(borb <45){
++                                        txtBorboleta.setTextColor(Color.parseColor("#048A15"));
++                                    }
++
++                                    txtBorboleta.setText("Borboleta: " + borb + "%");
++
++                                }
++                                if (retorno[1].trim().equals("10")) {
++                                    int p1 = Integer.parseInt(retorno[2].trim(), 16);
++                                    int p2 = Integer.parseInt(retorno[3].trim(), 16);
++                                    double fluxo = (p1 * 256 + p2) / 100;
++
++                                    if(fluxo >400){
++                                        txtFluxoAr.setTextColor(Color.RED);
++                                    }else if(fluxo>200 && fluxo<=400){
++                                        txtFluxoAr.setTextColor(Color.parseColor("#E0BC00"));
++                                    }else if(fluxo <=200){
++                                        txtFluxoAr.setTextColor(Color.parseColor("#048A15"));
++                                    }
++
++                                    txtFluxoAr.setText("Fluxo de Ar: " + fluxo);
++                                }
++                            }
++                            if (retorno[0].trim().equals("05") || retorno[0].trim().equals("0C") || retorno[0].trim().equals("0D") || retorno[0].trim().equals("11") || retorno[0].trim().equals("10")) {
++                                if (retorno[0].trim().equals("05")) {
++                                    int temp = Integer.parseInt(retorno[1].trim(), 16);
++                                    temp = temp - 40;
++
++                                    if(temp >=180){
++                                        txtTemperatura.setTextColor(Color.RED);
++                                    }else if(temp>=100 && temp<179){
++                                        txtTemperatura.setTextColor(Color.parseColor("#E0BC00"));
++                                    }else if(temp <100){
++                                        txtTemperatura.setTextColor(Color.parseColor("#048A15"));
++                                    }
++
++                                    txtTemperatura.setText("Temperatura: " + temp + "Cº");
++                                }
++                                if (retorno[0].trim().equals("0C")) {
++                                    int p1 = Integer.parseInt(retorno[1].trim(), 16);
++                                    int p2 = Integer.parseInt(retorno[2].trim(), 16);
++                                    double rpm = (p1 * 256 + p2) / 4;
++
++                                    if(rpm >=100){
++                                        txtVelocidade.setTextColor(Color.RED);
++                                    }else if(rpm>=60 && rpm<=100){
++                                        txtVelocidade.setTextColor(Color.parseColor("#E0BC00"));
++                                    }else if(rpm <60){
++                                        txtVelocidade.setTextColor(Color.parseColor("#048A15"));
++                                    }
++
++                                    txtRPM.setText("RPM: " + rpm);
++                                }
++                                if (retorno[0].trim().equals("0D")) {
++                                    int vel = Integer.parseInt(retorno[1].trim(), 16);
++
++                                    if(vel >=100){
++                                        txtVelocidade.setTextColor(Color.RED);
++                                    }else if(vel>=60 && vel<=100){
++                                        txtVelocidade.setTextColor(Color.parseColor("#E0BC00"));
++                                    }else if(vel <60){
++                                        txtVelocidade.setTextColor(Color.parseColor("#048A15"));
++                                    }
++
++                                    txtVelocidade.setText("Velocidade: " + vel + " km/h");
++                                    //speedometer.setSpeed(vel, 1000, 300);
++                                }
++                                if (retorno[0].trim().equals("11")) {
++                                    int borb = Integer.parseInt(retorno[1].trim(), 16);
++                                    borb = borb * 100 / 255;
++
++                                    if(borb >=80){
++                                        txtBorboleta.setTextColor(Color.RED);
++                                    }else if(borb>=45 && borb<=79){
++                                        txtBorboleta.setTextColor(Color.parseColor("#E0BC00"));
++                                    }else if(borb <45){
++                                        txtBorboleta.setTextColor(Color.parseColor("#048A15"));
++                                    }
++
++                                    txtBorboleta.setText("Borboleta: " + borb + "%");
++                                }
++                                if (retorno[0].trim().equals("10")) {
++                                    int p1 = Integer.parseInt(retorno[1].trim(), 16);
++                                    int p2 = Integer.parseInt(retorno[2].trim(), 16);
++                                    double fluxo = (p1 * 256 + p2) / 100;
++
++                                    if(fluxo >400){
++                                        txtFluxoAr.setTextColor(Color.RED);
++                                    }else if(fluxo>200 && fluxo<=400){
++                                        txtFluxoAr.setTextColor(Color.parseColor("#E0BC00"));
++                                    }else if(fluxo <=200){
++                                        txtFluxoAr.setTextColor(Color.parseColor("#048A15"));
++                                    }
++
++                                    txtFluxoAr.setText("Fluxo de Ar: " + fluxo);
++                                }
++                            }
++                        } catch (Exception e)
++                        {
++
++                            Log.e( "ERRO", e.getMessage() );
++
++                        }
++
++                    }
++                    break;
++
++                case MSG_WRITE:
++                    byte[] writeBuf = (byte[]) msg.obj;
++                    String writeMessage = new String(writeBuf);
++                    //Toast.makeText(getApplicationContext(), "Entrou no handler: MSG_WRITE:" + writeMessage, Toast.LENGTH_SHORT).show();
++                    break;
++            }
++
++        }
++
++    };
++
++    
++    private class ExecuteThread extends Thread {
++        public void run() {
++            while (true) {
++                try {
++                    String msg = "";
++                    msg = "01 05\r";
++                    connectedThread.write(msg.getBytes());
++                    Thread.sleep(200);
++                    msg = "01 0C\r";
++                    connectedThread.write(msg.getBytes());
++                    Thread.sleep(200);
++                    msg = "01 0D\r";
++                    connectedThread.write(msg.getBytes());
++                    Thread.sleep(200);
++                    msg = "01 11\r";
++                    connectedThread.write(msg.getBytes());
++                    Thread.sleep(200);
++                    msg = "01 10\r";
++                    connectedThread.write(msg.getBytes());
++
++                    Thread.sleep(2000);
++                } catch (InterruptedException e) {
++                    e.printStackTrace();
++                }
++            }
++        }
++    }
++
++    private class AcceptThread extends Thread {
++        private final BluetoothServerSocket mmServerSocket;
++
++        public AcceptThread() {
++            // Use a temporary object that is later assigned to mmServerSocket,
++            // because mmServerSocket is final
++            BluetoothServerSocket tmp = null;
++            try {
++                // MY_UUID is the app's UUID string, also used by the client code
++                tmp = bluetoothAdapter.listenUsingRfcommWithServiceRecord("obdbt", MY_UUID);
++            } catch (IOException e) {
++            }
++            mmServerSocket = tmp;
++        }
++
++        public void run() {
++            BluetoothSocket socket = null;
++            // Keep listening until exception occurs or a socket is returned
++            while (true) {
++                try {
++                    socket = mmServerSocket.accept();
++                } catch (IOException e) {
++                    break;
++                }
++                // If a connection was accepted
++                if (socket != null) {
++                    // Do work to manage the connection (in a separate thread)
++                    manageConnectedSocket(socket);
++                    try {
++                        mmServerSocket.close();
++                    } catch (IOException e) {
++                        e.printStackTrace();
++                    }
++                    break;
++                }
++            }
++        }
++
++        /**
++         * Will cancel the listening socket, and cause the thread to finish
++         */
++        public void cancel() {
++            try {
++                mmServerSocket.close();
++            } catch (IOException e) {
++            }
++        }
++    }
++
++    private class ConnectedThread extends Thread {
++        private final BluetoothSocket mmSocket;
++        private final InputStream mmInStream;
++        private final OutputStream mmOutStream;
++
++        public ConnectedThread(BluetoothSocket socket) {
++            mmSocket = socket;
++            InputStream tmpIn = null;
++            OutputStream tmpOut = null;
++
++            // Get the input and output streams, using temp objects because
++            // member streams are final
++            try {
++                tmpIn = socket.getInputStream();
++                tmpOut = socket.getOutputStream();
++            } catch (IOException e) {
++            }
++
++            mmInStream = tmpIn;
++            mmOutStream = tmpOut;
++        }
++
++        public void run() {
++            byte[] buffer = new byte[1024];  // buffer store for the stream
++            int bytes; // bytes returned from read()
++
++            // Keep listening to the InputStream until an exception occurs
++            while (true) {
++                try {
++                    // Read from the InputStream
++                    bytes = mmInStream.read(buffer);
++                    // Send the obtained bytes to the UI activity
++                    mHandler.obtainMessage(MSG_READ, bytes, -1, buffer)
++                            .sendToTarget();
++                } catch (IOException e) {
++                    Log.e("ERROR",  e.getMessage());
++                    break;
++                }
++            }
++        }
++
++        /* Call this from the main activity to send data to the remote device */
++        public void write(byte[] bytes) {
++            try {
++                mmOutStream.write(bytes);
++
++                // Share the sent message back to the UI Activity
++                mHandler.obtainMessage(MSG_WRITE, -1, -1, bytes)
++                        .sendToTarget();
++            } catch (IOException e) {
++                Log.e("ERROR",  e.getMessage());
++            }
++        }
++
++        /* Call this from the main activity to shutdown the connection */
++        public void cancel() {
++            try {
++                mmSocket.close();
++            } catch (IOException e) {
++                Log.e("ERROR",  e.getMessage());
++            }
++        }
++    }
++
++
++}
+Index: app/src/androidTest/java/com/example/jackson/obd_trabalho/ApplicationTest.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+--- app/src/androidTest/java/com/example/jackson/obd_trabalho/ApplicationTest.java	(revision )
++++ app/src/androidTest/java/com/example/jackson/obd_trabalho/ApplicationTest.java	(revision )
+@@ -0,0 +1,13 @@
++package com.example.jackson.obd_trabalho;
++
++import android.app.Application;
++import android.test.ApplicationTestCase;
++
++/**
++ * <a href="http://d.android.com/tools/testing/testing_android.html">Testing Fundamentals</a>
++ */
++public class ApplicationTest extends ApplicationTestCase<Application> {
++    public ApplicationTest() {
++        super(Application.class);
++    }
++}
+\ No newline at end of file
+Index: app/src/main/res/layout/activity_main.xml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+--- app/src/main/res/layout/activity_main.xml	(revision )
++++ app/src/main/res/layout/activity_main.xml	(revision )
+@@ -0,0 +1,61 @@
++<?xml version="1.0" encoding="utf-8"?>
++<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
++    xmlns:tools="http://schemas.android.com/tools" android:layout_width="match_parent"
++    android:layout_height="match_parent" android:paddingLeft="@dimen/activity_vertical_margin"
++    android:paddingRight="@dimen/activity_vertical_margin"
++    android:paddingTop="@dimen/activity_vertical_margin"
++    android:orientation="vertical"
++    android:paddingBottom="@dimen/activity_vertical_margin" tools:context=".MainActivity"
++    android:weightSum="1">
++
++    <TextView
++        android:layout_width="wrap_content"
++        android:layout_height="wrap_content"
++        android:textAppearance="?android:attr/textAppearanceLarge"
++        android:text="Temperatura: "
++        android:id="@+id/txtTemperatura"
++        android:layout_marginTop="5dp" />
++
++    <TextView
++        android:layout_width="wrap_content"
++        android:layout_height="wrap_content"
++        android:textAppearance="?android:attr/textAppearanceLarge"
++        android:text="RPM: "
++        android:id="@+id/txtRMP"
++        android:layout_marginTop="5dp" />
++    <TextView
++        android:layout_width="wrap_content"
++        android:layout_height="wrap_content"
++        android:textAppearance="?android:attr/textAppearanceLarge"
++        android:text="Velocidade: "
++        android:id="@+id/txtVelocidade"
++        android:layout_marginTop="5dp" />
++    <TextView
++        android:layout_width="wrap_content"
++        android:layout_height="wrap_content"
++        android:textAppearance="?android:attr/textAppearanceLarge"
++        android:text="Borboleta: "
++        android:id="@+id/txtBorboleta"
++        android:layout_marginTop="5dp" />
++
++      <TextView
++        android:layout_width="wrap_content"
++        android:layout_height="wrap_content"
++        android:textAppearance="?android:attr/textAppearanceLarge"
++        android:text="Fluxo de Ar: "
++        android:id="@+id/txtFluxoAr"
++        android:layout_marginTop="5dp" />
++    <TextView
++        android:layout_width="match_parent"
++        android:layout_height="70dp"
++        android:textAppearance="?android:attr/textAppearanceLarge"
++        android:text="@string/componentes_name"
++        android:id="@+id/nomeComponentes"
++        android:paddingTop="15dp"
++        android:gravity="center"
++        android:layout_marginTop="5dp"
++        android:textStyle="bold"
++        android:layout_weight="0.24" />
++
++
++</LinearLayout>
+Index: app/build.gradle
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+--- app/build.gradle	(revision )
++++ app/build.gradle	(revision )
+@@ -0,0 +1,26 @@
++apply plugin: 'com.android.application'
++
++android {
++    compileSdkVersion 23
++    buildToolsVersion "23.0.2"
++
++    defaultConfig {
++        applicationId "com.example.jackson.obd_trabalho"
++        minSdkVersion 18
++        targetSdkVersion 23
++        versionCode 1
++        versionName "1.0"
++    }
++    buildTypes {
++        release {
++            minifyEnabled false
++            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
++        }
++    }
++}
++
++dependencies {
++    compile fileTree(dir: 'libs', include: ['*.jar'])
++    testCompile 'junit:junit:4.12'
++    compile 'com.android.support:appcompat-v7:23.1.0'
++}
+Index: app/src/main/AndroidManifest.xml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+--- app/src/main/AndroidManifest.xml	(revision )
++++ app/src/main/AndroidManifest.xml	(revision )
+@@ -0,0 +1,22 @@
++<?xml version="1.0" encoding="utf-8"?>
++<manifest xmlns:android="http://schemas.android.com/apk/res/android"
++    package="com.example.jackson.obd_trabalho" >
++
++    <uses-permission android:name="android.permission.BLUETOOTH" />
++
++    <application
++        android:allowBackup="true"
++        android:icon="@mipmap/ic_launcher"
++        android:label="@string/app_name"
++        android:supportsRtl="true"
++        android:theme="@style/AppTheme" >
++        <activity android:name=".MainActivity" >
++            <intent-filter>
++                <action android:name="android.intent.action.MAIN" />
++
++                <category android:name="android.intent.category.LAUNCHER" />
++            </intent-filter>
++        </activity>
++    </application>
++
++</manifest>
+Index: app/src/main/res/values/strings.xml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+--- app/src/main/res/values/strings.xml	(revision )
++++ app/src/main/res/values/strings.xml	(revision )
+@@ -0,0 +1,4 @@
++<resources>
++    <string name="app_name">OBD Sim Trabalho Pós - IMD</string>
++    <string name="componentes_name">COMPONENTES:\nJackson Meires\nJonas Jordão\nMaisson Saraiva</string>
++</resources>
+Index: app/.gitignore
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+--- app/.gitignore	(revision )
++++ app/.gitignore	(revision )
+@@ -0,0 +1,1 @@
++/build
+Index: app/src/main/res/values/colors.xml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+--- app/src/main/res/values/colors.xml	(revision )
++++ app/src/main/res/values/colors.xml	(revision )
+@@ -0,0 +1,6 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <color name="colorPrimary">#3F51B5</color>
++    <color name="colorPrimaryDark">#303F9F</color>
++    <color name="colorAccent">#FF4081</color>
++</resources>
+Index: .idea/.name
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+--- .idea/.name	(revision )
++++ .idea/.name	(revision )
+@@ -0,0 +1,1 @@
++obd_trabalho
+\ No newline at end of file
+Index: gradlew.bat
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+--- gradlew.bat	(revision )
++++ gradlew.bat	(revision )
+@@ -0,0 +1,90 @@
++@if "%DEBUG%" == "" @echo off
++@rem ##########################################################################
++@rem
++@rem  Gradle startup script for Windows
++@rem
++@rem ##########################################################################
++
++@rem Set local scope for the variables with windows NT shell
++if "%OS%"=="Windows_NT" setlocal
++
++@rem Add default JVM options here. You can also use JAVA_OPTS and GRADLE_OPTS to pass JVM options to this script.
++set DEFAULT_JVM_OPTS=
++
++set DIRNAME=%~dp0
++if "%DIRNAME%" == "" set DIRNAME=.
++set APP_BASE_NAME=%~n0
++set APP_HOME=%DIRNAME%
++
++@rem Find java.exe
++if defined JAVA_HOME goto findJavaFromJavaHome
++
++set JAVA_EXE=java.exe
++%JAVA_EXE% -version >NUL 2>&1
++if "%ERRORLEVEL%" == "0" goto init
++
++echo.
++echo ERROR: JAVA_HOME is not set and no 'java' command could be found in your PATH.
++echo.
++echo Please set the JAVA_HOME variable in your environment to match the
++echo location of your Java installation.
++
++goto fail
++
++:findJavaFromJavaHome
++set JAVA_HOME=%JAVA_HOME:"=%
++set JAVA_EXE=%JAVA_HOME%/bin/java.exe
++
++if exist "%JAVA_EXE%" goto init
++
++echo.
++echo ERROR: JAVA_HOME is set to an invalid directory: %JAVA_HOME%
++echo.
++echo Please set the JAVA_HOME variable in your environment to match the
++echo location of your Java installation.
++
++goto fail
++
++:init
++@rem Get command-line arguments, handling Windowz variants
++
++if not "%OS%" == "Windows_NT" goto win9xME_args
++if "%@eval[2+2]" == "4" goto 4NT_args
++
++:win9xME_args
++@rem Slurp the command line arguments.
++set CMD_LINE_ARGS=
++set _SKIP=2
++
++:win9xME_args_slurp
++if "x%~1" == "x" goto execute
++
++set CMD_LINE_ARGS=%*
++goto execute
++
++:4NT_args
++@rem Get arguments from the 4NT Shell from JP Software
++set CMD_LINE_ARGS=%$
++
++:execute
++@rem Setup the command line
++
++set CLASSPATH=%APP_HOME%\gradle\wrapper\gradle-wrapper.jar
++
++@rem Execute Gradle
++"%JAVA_EXE%" %DEFAULT_JVM_OPTS% %JAVA_OPTS% %GRADLE_OPTS% "-Dorg.gradle.appname=%APP_BASE_NAME%" -classpath "%CLASSPATH%" org.gradle.wrapper.GradleWrapperMain %CMD_LINE_ARGS%
++
++:end
++@rem End local scope for the variables with windows NT shell
++if "%ERRORLEVEL%"=="0" goto mainEnd
++
++:fail
++rem Set variable GRADLE_EXIT_CONSOLE if you need the _script_ return code instead of
++rem the _cmd.exe /c_ return code!
++if  not "" == "%GRADLE_EXIT_CONSOLE%" exit 1
++exit /b 1
++
++:mainEnd
++if "%OS%"=="Windows_NT" endlocal
++
++:omega
+Index: .idea/gradle.xml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+--- .idea/gradle.xml	(revision )
++++ .idea/gradle.xml	(revision )
+@@ -0,0 +1,19 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<project version="4">
++  <component name="GradleSettings">
++    <option name="linkedExternalProjectsSettings">
++      <GradleProjectSettings>
++        <option name="distributionType" value="LOCAL" />
++        <option name="externalProjectPath" value="$PROJECT_DIR$" />
++        <option name="gradleHome" value="C:\Program Files\Android\Android Studio\gradle\gradle-2.4" />
++        <option name="gradleJvm" value="1.8" />
++        <option name="modules">
++          <set>
++            <option value="$PROJECT_DIR$" />
++            <option value="$PROJECT_DIR$/app" />
++          </set>
++        </option>
++      </GradleProjectSettings>
++    </option>
++  </component>
++</project>
+\ No newline at end of file
+Index: obd_trabalho.iml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+--- obd_trabalho.iml	(revision )
++++ obd_trabalho.iml	(revision )
+@@ -0,0 +1,19 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<module external.linked.project.id="obd_trabalho" external.linked.project.path="$MODULE_DIR$" external.root.project.path="$MODULE_DIR$" external.system.id="GRADLE" external.system.module.group="" external.system.module.version="unspecified" type="JAVA_MODULE" version="4">
++  <component name="FacetManager">
++    <facet type="java-gradle" name="Java-Gradle">
++      <configuration>
++        <option name="BUILD_FOLDER_PATH" value="$MODULE_DIR$/build" />
++        <option name="BUILDABLE" value="false" />
++      </configuration>
++    </facet>
++  </component>
++  <component name="NewModuleRootManager" LANGUAGE_LEVEL="JDK_1_7" inherit-compiler-output="true">
++    <exclude-output />
++    <content url="file://$MODULE_DIR$">
++      <excludeFolder url="file://$MODULE_DIR$/.gradle" />
++    </content>
++    <orderEntry type="inheritedJdk" />
++    <orderEntry type="sourceFolder" forTests="false" />
++  </component>
++</module>
+\ No newline at end of file
+Index: app/app.iml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+--- app/app.iml	(revision )
++++ app/app.iml	(revision )
+@@ -0,0 +1,97 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<module external.linked.project.id=":app" external.linked.project.path="$MODULE_DIR$" external.root.project.path="$MODULE_DIR$/.." external.system.id="GRADLE" external.system.module.group="obd_trabalho" external.system.module.version="unspecified" type="JAVA_MODULE" version="4">
++  <component name="FacetManager">
++    <facet type="android-gradle" name="Android-Gradle">
++      <configuration>
++        <option name="GRADLE_PROJECT_PATH" value=":app" />
++      </configuration>
++    </facet>
++    <facet type="android" name="Android">
++      <configuration>
++        <option name="SELECTED_BUILD_VARIANT" value="debug" />
++        <option name="SELECTED_TEST_ARTIFACT" value="_android_test_" />
++        <option name="ASSEMBLE_TASK_NAME" value="assembleDebug" />
++        <option name="COMPILE_JAVA_TASK_NAME" value="compileDebugSources" />
++        <option name="ASSEMBLE_TEST_TASK_NAME" value="assembleDebugAndroidTest" />
++        <option name="COMPILE_JAVA_TEST_TASK_NAME" value="compileDebugAndroidTestSources" />
++        <afterSyncTasks>
++          <task>generateDebugAndroidTestSources</task>
++          <task>generateDebugSources</task>
++        </afterSyncTasks>
++        <option name="ALLOW_USER_CONFIGURATION" value="false" />
++        <option name="MANIFEST_FILE_RELATIVE_PATH" value="/src/main/AndroidManifest.xml" />
++        <option name="RES_FOLDER_RELATIVE_PATH" value="/src/main/res" />
++        <option name="RES_FOLDERS_RELATIVE_PATH" value="file://$MODULE_DIR$/src/main/res" />
++        <option name="ASSETS_FOLDER_RELATIVE_PATH" value="/src/main/assets" />
++      </configuration>
++    </facet>
++  </component>
++  <component name="NewModuleRootManager" LANGUAGE_LEVEL="JDK_1_7" inherit-compiler-output="false">
++    <output url="file://$MODULE_DIR$/build/intermediates/classes/debug" />
++    <output-test url="file://$MODULE_DIR$/build/intermediates/classes/androidTest/debug" />
++    <exclude-output />
++    <content url="file://$MODULE_DIR$">
++      <sourceFolder url="file://$MODULE_DIR$/build/generated/source/r/debug" isTestSource="false" generated="true" />
++      <sourceFolder url="file://$MODULE_DIR$/build/generated/source/aidl/debug" isTestSource="false" generated="true" />
++      <sourceFolder url="file://$MODULE_DIR$/build/generated/source/buildConfig/debug" isTestSource="false" generated="true" />
++      <sourceFolder url="file://$MODULE_DIR$/build/generated/source/rs/debug" isTestSource="false" generated="true" />
++      <sourceFolder url="file://$MODULE_DIR$/build/generated/res/rs/debug" type="java-resource" />
++      <sourceFolder url="file://$MODULE_DIR$/build/generated/res/resValues/debug" type="java-resource" />
++      <sourceFolder url="file://$MODULE_DIR$/build/generated/source/r/androidTest/debug" isTestSource="true" generated="true" />
++      <sourceFolder url="file://$MODULE_DIR$/build/generated/source/aidl/androidTest/debug" isTestSource="true" generated="true" />
++      <sourceFolder url="file://$MODULE_DIR$/build/generated/source/buildConfig/androidTest/debug" isTestSource="true" generated="true" />
++      <sourceFolder url="file://$MODULE_DIR$/build/generated/source/rs/androidTest/debug" isTestSource="true" generated="true" />
++      <sourceFolder url="file://$MODULE_DIR$/build/generated/res/rs/androidTest/debug" type="java-test-resource" />
++      <sourceFolder url="file://$MODULE_DIR$/build/generated/res/resValues/androidTest/debug" type="java-test-resource" />
++      <sourceFolder url="file://$MODULE_DIR$/src/debug/res" type="java-resource" />
++      <sourceFolder url="file://$MODULE_DIR$/src/debug/resources" type="java-resource" />
++      <sourceFolder url="file://$MODULE_DIR$/src/debug/assets" type="java-resource" />
++      <sourceFolder url="file://$MODULE_DIR$/src/debug/aidl" isTestSource="false" />
++      <sourceFolder url="file://$MODULE_DIR$/src/debug/java" isTestSource="false" />
++      <sourceFolder url="file://$MODULE_DIR$/src/debug/jni" isTestSource="false" />
++      <sourceFolder url="file://$MODULE_DIR$/src/debug/rs" isTestSource="false" />
++      <sourceFolder url="file://$MODULE_DIR$/src/main/res" type="java-resource" />
++      <sourceFolder url="file://$MODULE_DIR$/src/main/resources" type="java-resource" />
++      <sourceFolder url="file://$MODULE_DIR$/src/main/assets" type="java-resource" />
++      <sourceFolder url="file://$MODULE_DIR$/src/main/aidl" isTestSource="false" />
++      <sourceFolder url="file://$MODULE_DIR$/src/main/java" isTestSource="false" />
++      <sourceFolder url="file://$MODULE_DIR$/src/main/jni" isTestSource="false" />
++      <sourceFolder url="file://$MODULE_DIR$/src/main/rs" isTestSource="false" />
++      <sourceFolder url="file://$MODULE_DIR$/src/androidTest/res" type="java-test-resource" />
++      <sourceFolder url="file://$MODULE_DIR$/src/androidTest/resources" type="java-test-resource" />
++      <sourceFolder url="file://$MODULE_DIR$/src/androidTest/assets" type="java-test-resource" />
++      <sourceFolder url="file://$MODULE_DIR$/src/androidTest/aidl" isTestSource="true" />
++      <sourceFolder url="file://$MODULE_DIR$/src/androidTest/java" isTestSource="true" />
++      <sourceFolder url="file://$MODULE_DIR$/src/androidTest/jni" isTestSource="true" />
++      <sourceFolder url="file://$MODULE_DIR$/src/androidTest/rs" isTestSource="true" />
++      <excludeFolder url="file://$MODULE_DIR$/build/intermediates/assets" />
++      <excludeFolder url="file://$MODULE_DIR$/build/intermediates/bundles" />
++      <excludeFolder url="file://$MODULE_DIR$/build/intermediates/classes" />
++      <excludeFolder url="file://$MODULE_DIR$/build/intermediates/coverage-instrumented-classes" />
++      <excludeFolder url="file://$MODULE_DIR$/build/intermediates/dependency-cache" />
++      <excludeFolder url="file://$MODULE_DIR$/build/intermediates/dex" />
++      <excludeFolder url="file://$MODULE_DIR$/build/intermediates/dex-cache" />
++      <excludeFolder url="file://$MODULE_DIR$/build/intermediates/exploded-aar/com.android.support/appcompat-v7/23.1.0/jars" />
++      <excludeFolder url="file://$MODULE_DIR$/build/intermediates/exploded-aar/com.android.support/support-v4/23.1.0/jars" />
++      <excludeFolder url="file://$MODULE_DIR$/build/intermediates/incremental" />
++      <excludeFolder url="file://$MODULE_DIR$/build/intermediates/jacoco" />
++      <excludeFolder url="file://$MODULE_DIR$/build/intermediates/javaResources" />
++      <excludeFolder url="file://$MODULE_DIR$/build/intermediates/libs" />
++      <excludeFolder url="file://$MODULE_DIR$/build/intermediates/lint" />
++      <excludeFolder url="file://$MODULE_DIR$/build/intermediates/manifests" />
++      <excludeFolder url="file://$MODULE_DIR$/build/intermediates/ndk" />
++      <excludeFolder url="file://$MODULE_DIR$/build/intermediates/pre-dexed" />
++      <excludeFolder url="file://$MODULE_DIR$/build/intermediates/proguard" />
++      <excludeFolder url="file://$MODULE_DIR$/build/intermediates/res" />
++      <excludeFolder url="file://$MODULE_DIR$/build/intermediates/rs" />
++      <excludeFolder url="file://$MODULE_DIR$/build/intermediates/symbols" />
++      <excludeFolder url="file://$MODULE_DIR$/build/outputs" />
++      <excludeFolder url="file://$MODULE_DIR$/build/tmp" />
++    </content>
++    <orderEntry type="jdk" jdkName="Android API 23 Platform" jdkType="Android SDK" />
++    <orderEntry type="sourceFolder" forTests="false" />
++    <orderEntry type="library" exported="" name="support-v4-23.1.0" level="project" />
++    <orderEntry type="library" exported="" name="appcompat-v7-23.1.0" level="project" />
++    <orderEntry type="library" exported="" name="support-annotations-23.1.0" level="project" />
++  </component>
++</module>
+\ No newline at end of file
+Index: app/src/test/java/com/example/jackson/obd_trabalho/ExampleUnitTest.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+--- app/src/test/java/com/example/jackson/obd_trabalho/ExampleUnitTest.java	(revision )
++++ app/src/test/java/com/example/jackson/obd_trabalho/ExampleUnitTest.java	(revision )
+@@ -0,0 +1,15 @@
++package com.example.jackson.obd_trabalho;
++
++import org.junit.Test;
++
++import static org.junit.Assert.*;
++
++/**
++ * To work on unit tests, switch the Test Artifact in the Build Variants view.
++ */
++public class ExampleUnitTest {
++    @Test
++    public void addition_isCorrect() throws Exception {
++        assertEquals(4, 2 + 2);
++    }
++}
+\ No newline at end of file
+Index: app/src/main/res/values/styles.xml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+--- app/src/main/res/values/styles.xml	(revision )
++++ app/src/main/res/values/styles.xml	(revision )
+@@ -0,0 +1,11 @@
++<resources>
++
++    <!-- Base application theme. -->
++    <style name="AppTheme" parent="Theme.AppCompat.Light.DarkActionBar">
++        <!-- Customize your theme here. -->
++        <item name="colorPrimary">@color/colorPrimary</item>
++        <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
++        <item name="colorAccent">@color/colorAccent</item>
++    </style>
++
++</resources>
+Index: settings.gradle
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+--- settings.gradle	(revision )
++++ settings.gradle	(revision )
+@@ -0,0 +1,1 @@
++include ':app'
+Index: gradle/wrapper/gradle-wrapper.properties
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>windows-1252
+===================================================================
+--- gradle/wrapper/gradle-wrapper.properties	(revision )
++++ gradle/wrapper/gradle-wrapper.properties	(revision )
+@@ -0,0 +1,6 @@
++#Wed Nov 11 15:24:23 GMT-03:00 2015
++distributionBase=GRADLE_USER_HOME
++distributionPath=wrapper/dists
++zipStoreBase=GRADLE_USER_HOME
++zipStorePath=wrapper/dists
++distributionUrl=https\://services.gradle.org/distributions/gradle-2.4-all.zip
+Index: app/src/main/res/values/dimens.xml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+--- app/src/main/res/values/dimens.xml	(revision )
++++ app/src/main/res/values/dimens.xml	(revision )
+@@ -0,0 +1,5 @@
++<resources>
++    <!-- Default screen margins, per the Android Design guidelines. -->
++    <dimen name="activity_horizontal_margin">16dp</dimen>
++    <dimen name="activity_vertical_margin">16dp</dimen>
++</resources>
+Index: build.gradle
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+--- build.gradle	(revision )
++++ build.gradle	(revision )
+@@ -0,0 +1,23 @@
++// Top-level build file where you can add configuration options common to all sub-projects/modules.
++
++buildscript {
++    repositories {
++        jcenter()
++    }
++    dependencies {
++        classpath 'com.android.tools.build:gradle:1.3.0'
++
++        // NOTE: Do not place your application dependencies here; they belong
++        // in the individual module build.gradle files
++    }
++}
++
++allprojects {
++    repositories {
++        jcenter()
++    }
++}
++
++task clean(type: Delete) {
++    delete rootProject.buildDir
++}
+Index: gradlew
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+--- gradlew	(revision )
++++ gradlew	(revision )
+@@ -0,0 +1,164 @@
++#!/usr/bin/env bash
++
++##############################################################################
++##
++##  Gradle start up script for UN*X
++##
++##############################################################################
++
++# Add default JVM options here. You can also use JAVA_OPTS and GRADLE_OPTS to pass JVM options to this script.
++DEFAULT_JVM_OPTS=""
++
++APP_NAME="Gradle"
++APP_BASE_NAME=`basename "$0"`
++
++# Use the maximum available, or set MAX_FD != -1 to use that value.
++MAX_FD="maximum"
++
++warn ( ) {
++    echo "$*"
++}
++
++die ( ) {
++    echo
++    echo "$*"
++    echo
++    exit 1
++}
++
++# OS specific support (must be 'true' or 'false').
++cygwin=false
++msys=false
++darwin=false
++case "`uname`" in
++  CYGWIN* )
++    cygwin=true
++    ;;
++  Darwin* )
++    darwin=true
++    ;;
++  MINGW* )
++    msys=true
++    ;;
++esac
++
++# For Cygwin, ensure paths are in UNIX format before anything is touched.
++if $cygwin ; then
++    [ -n "$JAVA_HOME" ] && JAVA_HOME=`cygpath --unix "$JAVA_HOME"`
++fi
++
++# Attempt to set APP_HOME
++# Resolve links: $0 may be a link
++PRG="$0"
++# Need this for relative symlinks.
++while [ -h "$PRG" ] ; do
++    ls=`ls -ld "$PRG"`
++    link=`expr "$ls" : '.*-> \(.*\)$'`
++    if expr "$link" : '/.*' > /dev/null; then
++        PRG="$link"
++    else
++        PRG=`dirname "$PRG"`"/$link"
++    fi
++done
++SAVED="`pwd`"
++cd "`dirname \"$PRG\"`/" >&-
++APP_HOME="`pwd -P`"
++cd "$SAVED" >&-
++
++CLASSPATH=$APP_HOME/gradle/wrapper/gradle-wrapper.jar
++
++# Determine the Java command to use to start the JVM.
++if [ -n "$JAVA_HOME" ] ; then
++    if [ -x "$JAVA_HOME/jre/sh/java" ] ; then
++        # IBM's JDK on AIX uses strange locations for the executables
++        JAVACMD="$JAVA_HOME/jre/sh/java"
++    else
++        JAVACMD="$JAVA_HOME/bin/java"
++    fi
++    if [ ! -x "$JAVACMD" ] ; then
++        die "ERROR: JAVA_HOME is set to an invalid directory: $JAVA_HOME
++
++Please set the JAVA_HOME variable in your environment to match the
++location of your Java installation."
++    fi
++else
++    JAVACMD="java"
++    which java >/dev/null 2>&1 || die "ERROR: JAVA_HOME is not set and no 'java' command could be found in your PATH.
++
++Please set the JAVA_HOME variable in your environment to match the
++location of your Java installation."
++fi
++
++# Increase the maximum file descriptors if we can.
++if [ "$cygwin" = "false" -a "$darwin" = "false" ] ; then
++    MAX_FD_LIMIT=`ulimit -H -n`
++    if [ $? -eq 0 ] ; then
++        if [ "$MAX_FD" = "maximum" -o "$MAX_FD" = "max" ] ; then
++            MAX_FD="$MAX_FD_LIMIT"
++        fi
++        ulimit -n $MAX_FD
++        if [ $? -ne 0 ] ; then
++            warn "Could not set maximum file descriptor limit: $MAX_FD"
++        fi
++    else
++        warn "Could not query maximum file descriptor limit: $MAX_FD_LIMIT"
++    fi
++fi
++
++# For Darwin, add options to specify how the application appears in the dock
++if $darwin; then
++    GRADLE_OPTS="$GRADLE_OPTS \"-Xdock:name=$APP_NAME\" \"-Xdock:icon=$APP_HOME/media/gradle.icns\""
++fi
++
++# For Cygwin, switch paths to Windows format before running java
++if $cygwin ; then
++    APP_HOME=`cygpath --path --mixed "$APP_HOME"`
++    CLASSPATH=`cygpath --path --mixed "$CLASSPATH"`
++
++    # We build the pattern for arguments to be converted via cygpath
++    ROOTDIRSRAW=`find -L / -maxdepth 1 -mindepth 1 -type d 2>/dev/null`
++    SEP=""
++    for dir in $ROOTDIRSRAW ; do
++        ROOTDIRS="$ROOTDIRS$SEP$dir"
++        SEP="|"
++    done
++    OURCYGPATTERN="(^($ROOTDIRS))"
++    # Add a user-defined pattern to the cygpath arguments
++    if [ "$GRADLE_CYGPATTERN" != "" ] ; then
++        OURCYGPATTERN="$OURCYGPATTERN|($GRADLE_CYGPATTERN)"
++    fi
++    # Now convert the arguments - kludge to limit ourselves to /bin/sh
++    i=0
++    for arg in "$@" ; do
++        CHECK=`echo "$arg"|egrep -c "$OURCYGPATTERN" -`
++        CHECK2=`echo "$arg"|egrep -c "^-"`                                 ### Determine if an option
++
++        if [ $CHECK -ne 0 ] && [ $CHECK2 -eq 0 ] ; then                    ### Added a condition
++            eval `echo args$i`=`cygpath --path --ignore --mixed "$arg"`
++        else
++            eval `echo args$i`="\"$arg\""
++        fi
++        i=$((i+1))
++    done
++    case $i in
++        (0) set -- ;;
++        (1) set -- "$args0" ;;
++        (2) set -- "$args0" "$args1" ;;
++        (3) set -- "$args0" "$args1" "$args2" ;;
++        (4) set -- "$args0" "$args1" "$args2" "$args3" ;;
++        (5) set -- "$args0" "$args1" "$args2" "$args3" "$args4" ;;
++        (6) set -- "$args0" "$args1" "$args2" "$args3" "$args4" "$args5" ;;
++        (7) set -- "$args0" "$args1" "$args2" "$args3" "$args4" "$args5" "$args6" ;;
++        (8) set -- "$args0" "$args1" "$args2" "$args3" "$args4" "$args5" "$args6" "$args7" ;;
++        (9) set -- "$args0" "$args1" "$args2" "$args3" "$args4" "$args5" "$args6" "$args7" "$args8" ;;
++    esac
++fi
++
++# Split up the JVM_OPTS And GRADLE_OPTS values into an array, following the shell quoting and substitution rules
++function splitJvmOpts() {
++    JVM_OPTS=("$@")
++}
++eval splitJvmOpts $DEFAULT_JVM_OPTS $JAVA_OPTS $GRADLE_OPTS
++JVM_OPTS[${#JVM_OPTS[*]}]="-Dorg.gradle.appname=$APP_BASE_NAME"
++
++exec "$JAVACMD" "${JVM_OPTS[@]}" -classpath "$CLASSPATH" org.gradle.wrapper.GradleWrapperMain "$@"
+Index: app/proguard-rules.pro
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+--- app/proguard-rules.pro	(revision )
++++ app/proguard-rules.pro	(revision )
+@@ -0,0 +1,17 @@
++# Add project specific ProGuard rules here.
++# By default, the flags in this file are appended to flags specified
++# in C:\Users\Jackson\AppData\Local\Android\sdk/tools/proguard/proguard-android.txt
++# You can edit the include path and order by changing the proguardFiles
++# directive in build.gradle.
++#
++# For more details, see
++#   http://developer.android.com/guide/developing/tools/proguard.html
++
++# Add any project specific keep options here:
++
++# If your project uses WebView with JS, uncomment the following
++# and specify the fully qualified class name to the JavaScript interface
++# class:
++#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
++#   public *;
++#}
+Index: app/src/main/res/values-w820dp/dimens.xml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+--- app/src/main/res/values-w820dp/dimens.xml	(revision )
++++ app/src/main/res/values-w820dp/dimens.xml	(revision )
+@@ -0,0 +1,6 @@
++<resources>
++    <!-- Example customization of dimensions originally defined in res/values/dimens.xml
++         (such as screen margins) for screens with more than 820dp of available width. This
++         would include 7" and 10" devices in landscape (~960dp and ~1280dp respectively). -->
++    <dimen name="activity_horizontal_margin">64dp</dimen>
++</resources>
+Index: .idea/copyright/profiles_settings.xml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+--- .idea/copyright/profiles_settings.xml	(revision )
++++ .idea/copyright/profiles_settings.xml	(revision )
+@@ -0,0 +1,3 @@
++<component name="CopyrightManager">
++  <settings default="" />
++</component>
+\ No newline at end of file
+Index: .idea/runConfigurations.xml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+--- .idea/runConfigurations.xml	(revision )
++++ .idea/runConfigurations.xml	(revision )
+@@ -0,0 +1,12 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<project version="4">
++  <component name="RunConfigurationProducerService">
++    <option name="ignoredProducers">
++      <set>
++        <option value="org.jetbrains.plugins.gradle.execution.test.runner.AllInPackageGradleConfigurationProducer" />
++        <option value="org.jetbrains.plugins.gradle.execution.test.runner.TestClassGradleConfigurationProducer" />
++        <option value="org.jetbrains.plugins.gradle.execution.test.runner.TestMethodGradleConfigurationProducer" />
++      </set>
++    </option>
++  </component>
++</project>
+\ No newline at end of file
+Index: .idea/misc.xml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+--- .idea/misc.xml	(revision )
++++ .idea/misc.xml	(revision )
+@@ -0,0 +1,46 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<project version="4">
++  <component name="EntryPointsManager">
++    <entry_points version="2.0" />
++  </component>
++  <component name="NullableNotNullManager">
++    <option name="myDefaultNullable" value="android.support.annotation.Nullable" />
++    <option name="myDefaultNotNull" value="android.support.annotation.NonNull" />
++    <option name="myNullables">
++      <value>
++        <list size="4">
++          <item index="0" class="java.lang.String" itemvalue="org.jetbrains.annotations.Nullable" />
++          <item index="1" class="java.lang.String" itemvalue="javax.annotation.Nullable" />
++          <item index="2" class="java.lang.String" itemvalue="edu.umd.cs.findbugs.annotations.Nullable" />
++          <item index="3" class="java.lang.String" itemvalue="android.support.annotation.Nullable" />
++        </list>
++      </value>
++    </option>
++    <option name="myNotNulls">
++      <value>
++        <list size="4">
++          <item index="0" class="java.lang.String" itemvalue="org.jetbrains.annotations.NotNull" />
++          <item index="1" class="java.lang.String" itemvalue="javax.annotation.Nonnull" />
++          <item index="2" class="java.lang.String" itemvalue="edu.umd.cs.findbugs.annotations.NonNull" />
++          <item index="3" class="java.lang.String" itemvalue="android.support.annotation.NonNull" />
++        </list>
++      </value>
++    </option>
++  </component>
++  <component name="ProjectLevelVcsManager" settingsEditedManually="false">
++    <OptionsSetting value="true" id="Add" />
++    <OptionsSetting value="true" id="Remove" />
++    <OptionsSetting value="true" id="Checkout" />
++    <OptionsSetting value="true" id="Update" />
++    <OptionsSetting value="true" id="Status" />
++    <OptionsSetting value="true" id="Edit" />
++    <ConfirmationsSetting value="0" id="Add" />
++    <ConfirmationsSetting value="0" id="Remove" />
++  </component>
++  <component name="ProjectRootManager" version="2" languageLevel="JDK_1_7" default="true" assert-keyword="true" jdk-15="true" project-jdk-name="1.8" project-jdk-type="JavaSDK">
++    <output url="file://$PROJECT_DIR$/build/classes" />
++  </component>
++  <component name="ProjectType">
++    <option name="id" value="Android" />
++  </component>
++</project>
+\ No newline at end of file
+Index: .idea/vcs.xml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+--- .idea/vcs.xml	(revision )
++++ .idea/vcs.xml	(revision )
+@@ -0,0 +1,6 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<project version="4">
++  <component name="VcsDirectoryMappings">
++    <mapping directory="$PROJECT_DIR$" vcs="Git" />
++  </component>
++</project>
+\ No newline at end of file
+Index: .idea/encodings.xml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+--- .idea/encodings.xml	(revision )
++++ .idea/encodings.xml	(revision )
+@@ -0,0 +1,6 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<project version="4">
++  <component name="Encoding">
++    <file url="PROJECT" charset="UTF-8" />
++  </component>
++</project>
+\ No newline at end of file
+Index: .idea/modules.xml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+--- .idea/modules.xml	(revision )
++++ .idea/modules.xml	(revision )
+@@ -0,0 +1,9 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<project version="4">
++  <component name="ProjectModuleManager">
++    <modules>
++      <module fileurl="file://$PROJECT_DIR$/app/app.iml" filepath="$PROJECT_DIR$/app/app.iml" />
++      <module fileurl="file://$PROJECT_DIR$/obd_trabalho.iml" filepath="$PROJECT_DIR$/obd_trabalho.iml" />
++    </modules>
++  </component>
++</project>
+\ No newline at end of file
+Index: gradle.properties
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>windows-1252
+===================================================================
+--- gradle.properties	(revision )
++++ gradle.properties	(revision )
+@@ -0,0 +1,18 @@
++# Project-wide Gradle settings.
++
++# IDE (e.g. Android Studio) users:
++# Gradle settings configured through the IDE *will override*
++# any settings specified in this file.
++
++# For more details on how to configure your build environment visit
++# http://www.gradle.org/docs/current/userguide/build_environment.html
++
++# Specifies the JVM arguments used for the daemon process.
++# The setting is particularly useful for tweaking memory settings.
++# Default value: -Xmx10248m -XX:MaxPermSize=256m
++# org.gradle.jvmargs=-Xmx2048m -XX:MaxPermSize=512m -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8
++
++# When configured, Gradle will run in incubating parallel mode.
++# This option should only be used with decoupled projects. More details, visit
++# http://www.gradle.org/docs/current/userguide/multi_project_builds.html#sec:decoupled_projects
++# org.gradle.parallel=true
+\ No newline at end of file
+Index: .gitignore
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+--- .gitignore	(revision )
++++ .gitignore	(revision )
+@@ -0,0 +1,7 @@
++.gradle
++/local.properties
++/.idea/workspace.xml
++/.idea/libraries
++.DS_Store
++/build
++/captures
+Index: .idea/compiler.xml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+--- .idea/compiler.xml	(revision )
++++ .idea/compiler.xml	(revision )
+@@ -0,0 +1,22 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<project version="4">
++  <component name="CompilerConfiguration">
++    <resourceExtensions />
++    <wildcardResourcePatterns>
++      <entry name="!?*.java" />
++      <entry name="!?*.form" />
++      <entry name="!?*.class" />
++      <entry name="!?*.groovy" />
++      <entry name="!?*.scala" />
++      <entry name="!?*.flex" />
++      <entry name="!?*.kt" />
++      <entry name="!?*.clj" />
++      <entry name="!?*.aj" />
++    </wildcardResourcePatterns>
++    <annotationProcessing>
++      <profile default="true" name="Default" enabled="false">
++        <processorPath useClasspath="true" />
++      </profile>
++    </annotationProcessing>
++  </component>
++</project>
+\ No newline at end of file
